@@ -1,10 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-上海中考体育评分神器 —— 终极增强版（2025标准）
-- 默认满分15分
-- 更多自定义配置项（小数位、颜色、排名方式、排序、优秀率等）
-- 自定义项目 + 单位 + 统计 + 保存配置
-"""
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -208,7 +202,7 @@ def get_score(gender, project, value):
 class SportsScoreGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("上海中考体育评分神器 - 终极增强版")
+        self.root.title("上海中考体育评分")
         self.root.geometry("1000x800")
 
         self.input_file = ""
@@ -780,3 +774,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SportsScoreGUI(root)
     root.mainloop()
+
