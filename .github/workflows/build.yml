@@ -40,8 +40,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: builds-${{ runner.os }}
+          name: SportsScoreApp-${{ runner.os }}
           path: SportsScoreApp-${{ runner.os }}.zip
+          overwrite: true
 
   release:
     needs: build
