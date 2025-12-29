@@ -27,7 +27,7 @@ jobs:
           pip install pyinstaller pillow  # 关键！安装 Pillow 用于转换图标
 
       - name: Convert icon to icns (macOS only)
-        if: runner.os == 'macOS'
+        if: runner.os == 'MacOS'
         run: |
           python -c "
           from PIL import Image
@@ -38,7 +38,7 @@ jobs:
 
       - name: Build with PyInstaller (multi-file)
         run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
+          if [[ "${{ runner.os }}" == "MacOS" ]]; then
             pyinstaller --onedir --windowed --icon=logo.icns --name SportsScoreApp GUI.py
           else
             pyinstaller --onedir --windowed --icon=logo.ico --name SportsScoreApp GUI.py
