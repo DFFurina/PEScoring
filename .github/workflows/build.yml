@@ -39,13 +39,17 @@ jobs:
           print('Converted logo.ico to logo.icns')
           "
 
-      - name: Build with PyInstaller (multi-file)
-        run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            pyinstaller --onedir --windowed --icon=logo.icns --name SportsScoreApp GUI.py
-          else
-            pyinstaller --onedir --windowed --icon=logo.ico --name SportsScoreApp GUI.py
-          fi
+      - name: Build with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: pyinstaller --onedir --windowed --icon=logo.ico --name SportsScoreApp GUI.py
+
+      - name: Build with PyInstaller (macOS)
+        if: runner.os == 'macOS'
+        run: pyinstaller --onedir --windowed --icon=logo.icns --name SportsScoreApp GUI.py
+
+      - name: Build with PyInstaller (Linux)
+        if: runner.os == 'Linux'
+        run: pyinstaller --onedir --windowed --icon=logo.ico --name SportsScoreApp GUI.py
 
       - name: Zip the build directory
         uses: vimtor/action-zip@v1
