@@ -67,6 +67,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 关键！给写权限
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -76,6 +78,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GH_TOKEN }}  # 用你的高权限 token
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           files: |
