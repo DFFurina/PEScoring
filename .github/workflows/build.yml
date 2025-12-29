@@ -79,6 +79,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           files: |
-            artifacts/SportsScoreApp-ubuntu-latest/*.zip
-            artifacts/SportsScoreApp-macos-latest/*.zip
-            artifacts/SportsScoreApp-windows-latest/*.zip
+            artifacts/SportsScoreApp-Linux/*.zip
+            artifacts/SportsScoreApp-macOS/*.zip
+            artifacts/SportsScoreApp-Windows/*.zip
