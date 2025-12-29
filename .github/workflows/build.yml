@@ -11,7 +11,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    timeout-minutes: 60  # 每个 job 最多60分钟，防止自动取消
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,11 +24,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller pillow
+          pip install pyinstaller pillow  # 关键！安装 Pillow 用于转换图标
+
+      - name: Convert icon to icns (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          python -c "
+          from PIL import Image
+          im = Image.open('logo.ico')
+          im.save('logo.icns')
+          print('Converted logo.ico to logo.icns')
+          "
 
       - name: Build with PyInstaller (multi-file)
         run: |
-          pyinstaller --onedir --windowed --icon=logo.ico --name SportsScoreApp GUI.py
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            pyinstaller --onedir --windowed --icon=logo.icns --name SportsScoreApp GUI.py
+          else
+            pyinstaller --onedir --windowed --icon=logo.ico --name SportsScoreApp GUI.py
+          fi
 
       - name: Zip the build directory
         uses: vimtor/action-zip@v1
@@ -59,6 +72,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           files: |
-            artifacts/builds-ubuntu-latest/*.zip
-            artifacts/builds-macos-latest/*.zip
-            artifacts/builds-windows-latest/*.zip
+            artifacts/SportsScoreApp-ubuntu-latest/*.zip
+            artifacts/SportsScoreApp-macos-latest/*.zip
+            artifacts/SportsScoreApp-windows-latest/*.zip
