@@ -3,3 +3,5 @@ numpy
 openpyxl
 pyinstaller
 pillow
+requests
+
