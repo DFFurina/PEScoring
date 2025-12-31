@@ -8,6 +8,7 @@ import re
 import os
 import json
 import warnings
+import requests
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
@@ -35,7 +36,10 @@ DEFAULT_CONFIG = {
     '排名并列方式': 'min',           # 新增：min（并列）或dense（连续）
     '是否自动排序班级': True,        # 新增：输出时按总分降序排序
     '统计包含优秀率': True,          # 新增：统计表是否加优秀率列
-    '统计文件名后缀': '_统计汇总'      # 新增：统计文件后缀
+    '统计文件名后缀': '_统计汇总'，      # 新增：统计文件后缀
+    '当前版本': '1.0.0',              # 你当前的程序版本，发布新版时改这里
+    '忽略更新版本': ''                # 用户选择“不再提醒”时记录被忽略的版本号
+
 }
 
 RUN_BONUS = {
@@ -127,7 +131,7 @@ def get_score(gender, project, value):
     if p == '实心球' and DEFAULT_CONFIG['实心球单位'] == '厘米':
         val /= 100
 
-    # 自定义项目
+    # 自定义项目（用户添加的）
     for custom in DEFAULT_CONFIG['自定义项目']:
         if custom['name'] == p:
             std = custom['full_value']
@@ -138,6 +142,19 @@ def get_score(gender, project, value):
                 ratio = std / val if val > 0 else 0
             score = ratio * 3
             return round(max(0, min(3, score)), 2)
+
+    # 写死的特殊项目：武术、体操（满分3分线性制）
+    if p == '武术':
+        std = 10.0
+        ratio = val / std
+        score = ratio * 3
+        return round(max(0, min(3, score)), 2)
+
+    if p == '体操':
+        std = 20.0
+        ratio = val / std
+        score = ratio * 3
+        return round(max(0, min(3, score)), 2)
 
     # 800/1000米特殊
     if p == '800/1000米':
@@ -219,6 +236,8 @@ class SportsScoreGUI:
         self.create_widgets()
         self.load_config()
         self.update_custom_list()
+        self.check_for_update()
+
 
     def create_widgets(self):
         notebook = ttk.Notebook(self.root)
@@ -494,6 +513,9 @@ class SportsScoreGUI:
 
     def save_config(self):
         config = {}
+        config['当前版本'] = DEFAULT_CONFIG['当前版本']
+        config['忽略更新版本'] = DEFAULT_CONFIG.get('忽略更新版本', '')
+
         for label, entry in self.config_entries.items():
             value = entry.get().strip().upper()
             if value:
@@ -770,8 +792,31 @@ class SportsScoreGUI:
         messagebox.showinfo("成功", "所有任务完成！")
         os.startfile(self.output_file)
 
+    def check_for_update(self):
+        current_version = DEFAULT_CONFIG['当前版本']
+        ignore_version = DEFAULT_CONFIG.get('忽略更新版本', '')
+
+        try:
+            response = requests.get("https://1427.tech/projects/PEScoring/latest", timeout=5)
+            if response.status_code == 200:
+                latest_version = response.text.strip()
+                if latest_version != current_version and latest_version != ignore_version:
+                    result = messagebox.askyesnocancel(
+                        "发现新版本",
+                        f"当前版本：{current_version}\n最新版本：{latest_version}\n\n是否打开下载页面？"
+                    )
+                    if result is True:  # 是 → 打开浏览器
+                        import webbrowser
+                        webbrowser.open("https://1427.tech/projects/PEScoring")
+                    elif result is False:  # 否 → 不再提醒此版本
+                        DEFAULT_CONFIG['忽略更新版本'] = latest_version
+                        self.save_config()  # 保存到配置文件
+        except:
+            pass  # 网络错误或超时，静默忽略
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = SportsScoreGUI(root)
     root.mainloop()
+
 
