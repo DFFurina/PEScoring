@@ -4,4 +4,4 @@ openpyxl
 pyinstaller
 pillow
 requests
-
+xlrd
