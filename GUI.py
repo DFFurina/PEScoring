@@ -117,6 +117,8 @@ def get_score(gender, project, value):
         '4分钟跳绳':'4min跳绳','4min跳绳':'4min跳绳',
         '50米跑':'50m跑','排球垫球':'排球','排球':'排球',
         '乒乓':'乒乓球','乒乓球':'乒乓球',
+        '25m游泳':'25米游泳','25米游泳':'25米游泳',
+        '200m游泳':'200米游泳','200米游泳':'200米游泳',
         '武术操':'武术','武术':'武术','体操':'体操','羽毛球':'羽毛球','篮球':'篮球','足球':'足球运球'
     }
     p = p_map.get(p, p)
@@ -195,8 +197,20 @@ def get_score(gender, project, value):
         key = '立定跳远男生满分米数' if gender == '男' else '立定跳远女生满分米数'
     elif p == '50m跑':
         key = '50米跑男生满分秒数' if gender == '男' else '50米跑女生满分秒数'
-    elif p == '25m游泳':
-        key = '25米游泳男生满分秒数' if gender == '男' else '25米游泳女生满分秒数'
+    elif p in ['25m游泳', '25米游泳', '200米游泳']:
+        if p == '25m游泳' or p == '25米游泳':
+            key = '25米游泳男生满分秒数' if gender == '男' else '25米游泳女生满分秒数'
+        else:  # 200米游泳
+            key = '200米游泳满分秒数'
+        if key in STANDARD_FULL:
+            val = time_to_seconds(value)
+            std = STANDARD_FULL[key]  # 满分对应的最短时间
+            if val <= 0: return 0.0
+            # 时间越短越好：用满分时间 / 实际时间 算比例
+            ratio = std / val
+            score = ratio * 3
+            print(std, val, ratio, score)
+            return round(max(0, min(3, score)), 2)
     elif p == '足球运球':
         key = '足球运球男生满分秒数' if gender == '男' else '足球运球女生满分秒数'
     elif p == '4min跳绳':
@@ -818,6 +832,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SportsScoreGUI(root)
     root.mainloop()
+
 
 
 
