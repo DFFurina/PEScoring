@@ -11,12 +11,13 @@ import warnings
 import requests
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
+import math
 
 warnings.filterwarnings("ignore")
 
 CONFIG_FILE = "体育评分配置.json"
 
-# ====================== 默认配置（满分改为15分） ======================
+# ====================== 默认配置（还原所有可配置项） ======================
 DEFAULT_CONFIG = {
     '姓名列': 'C', '性别列': 'D',
     '第一类项目列': 'E', '第一类成绩列': 'F', '第一类得分列': 'G',
@@ -24,55 +25,218 @@ DEFAULT_CONFIG = {
     '第三类项目列': 'M', '第三类成绩列': 'N', '第三类得分列': 'O',
     '第四类项目列': 'Q', '第四类成绩列': 'R', '第四类得分列': 'S',
     '总分列': 'T',
-    '满分标准': 15.0,               # 修改为15分满分
+    '满分标准': 15.0,
     '优秀标准': 12.0,
     '是否加排名列': False,
     '缺考背景色': 'FFFF00',
-    '立定跳远单位': '厘米',
+    '立定跳远单位': '米',
     '实心球单位': '米',
     '自定义项目': [],
-    '总分小数位数': 2,               # 新增：总分保留小数位
-    '缺考字体颜色': 'FF0000',        # 新增：缺考标红字体颜色（16进制）
-    '排名并列方式': 'min',           # 新增：min（并列）或dense（连续）
-    '是否自动排序班级': True,        # 新增：输出时按总分降序排序
-    '统计包含优秀率': True,          # 新增：统计表是否加优秀率列
-    '统计文件名后缀': '_统计汇总',      # 新增：统计文件后缀
-    '当前版本': '1.0.4',              # 你当前的程序版本，发布新版时改这里
-    '忽略更新版本': ''                # 用户选择“不再提醒”时记录被忽略的版本号
+    '自定义映射项目': [],  # 新增：存储GUI添加的映射项目
+    '总分小数位数': 2,
+    '缺考字体颜色': 'FF0000',
+    '排名并列方式': 'min',
+    '是否自动排序班级': True,
+    '统计包含优秀率': True,
+    '统计文件名后缀': '_统计汇总',
+    '当前版本': '2.0.0',
+    '忽略更新版本': ''
+}
 
+STANDARD_FULL = {}  # 空字典，用于兼容GUI界面的循环调用
+
+# ====================== 官方评分映射表（核心修复：替换线性计算为精准映射） ======================
+# 1. 800/1000米（含附加分）- 官方标准（单位：秒）
+RUN_SCORES = {
+    '男生1000米': [
+        (235, 6.0), (243, 5.7), (251, 5.4), (259, 5.1), (267, 4.8), (272, 4.5), (277, 4.2),
+        (282, 3.9), (287, 3.6), (293, 3.3), (299, 3.0), (305, 2.7), (311, 2.4), (317, 2.1),
+        (323, 1.8), (329, 1.5), (335, 1.2), (341, 0.9), (347, 0.6), (353, 0.3), (359, 0.0)
+    ],
+    '女生800米': [
+        (220, 6.0), (228, 5.7), (236, 5.4), (244, 5.1), (252, 4.8), (257, 4.5), (262, 4.2),
+        (267, 3.9), (272, 3.6), (278, 3.3), (284, 3.0), (290, 2.7), (296, 2.4), (302, 2.1),
+        (308, 1.8), (314, 1.5), (320, 1.2), (326, 0.9), (332, 0.6), (338, 0.3), (344, 0.0)
+    ]
 }
 
 RUN_BONUS = {
-    '女生800米_1分秒数': 205,
-    '女生800米_0.5分秒数': 219,
-    '男生1000米_1分秒数': 220,
-    '男生1000米_0.5分秒数': 234,
+    '女生800米_1分秒数': 205,    # 3'25"及以内加1分
+    '女生800米_0.5分秒数': 219,  # 3'26"-3'39"加0.5分
+    '男生1000米_1分秒数': 220,  # 3'40"及以内加1分
+    '男生1000米_0.5分秒数': 234  # 3'41"-3'54"加0.5分
 }
 
-STANDARD_FULL = {
-    '引体向上满分次数': 11,
-    '实心球男生满分米数': 9.7,
-    '实心球女生满分米数': 6.8,
-    '立定跳远男生满分米数': 2.49,
-    '立定跳远女生满分米数': 1.99,
-    '50米跑男生满分秒数': 7.1,
-    '50米跑女生满分秒数': 8.1,
-    '25米游泳男生满分秒数': 22.0,
-    '25米游泳女生满分秒数': 25.0,
-    '足球运球男生满分秒数': 7.6,
-    '足球运球女生满分秒数': 8.5,
-    '仰卧起坐满分次数': 50,
-    '4分钟跳绳男生满分次数': 400,
-    '4分钟跳绳女生满分次数': 405,
-    '200米游泳满分秒数': 276
+# 2. 实心球（双手头上前掷）- 官方标准（单位：米）
+SHIXINQIU_SCORES = {
+    '男生': [
+        (9.7, 3.0), (9.4, 2.85), (9.1, 2.7), (8.8, 2.55), (8.5, 2.4), (8.2, 2.25), (7.9, 2.1),
+        (7.6, 1.95), (7.3, 1.8), (7.0, 1.65), (6.7, 1.5), (6.4, 1.35), (6.1, 1.2), (5.8, 1.05),
+        (5.5, 0.9), (5.2, 0.75), (4.9, 0.6), (4.6, 0.45), (4.3, 0.3), (4.0, 0.15)
+    ],
+    '女生': [
+        (6.8, 3.0), (6.6, 2.85), (6.4, 2.7), (6.2, 2.55), (6.0, 2.4), (5.8, 2.25), (5.6, 2.1),
+        (5.4, 1.95), (5.2, 1.8), (5.0, 1.65), (4.8, 1.5), (4.6, 1.35), (4.4, 1.2), (4.2, 1.05),
+        (4.0, 0.9), (3.8, 0.75), (3.6, 0.6), (3.4, 0.45), (3.2, 0.3), (3.0, 0.15)
+    ]
 }
 
-PINGPONG_SCORES = {25:3.00,24:2.88,23:2.76,22:2.64,21:2.52,20:2.40,19:2.28,18:2.16,17:2.04,16:1.92,
-                   15:1.80,14:1.68,13:1.56,12:1.44,11:1.32,10:1.20,9:1.08,8:0.96,7:0.84,6:0.72,
-                   5:0.60,4:0.48,3:0.36,2:0.24,1:0.12}
+# 3. 立定跳远 - 官方标准（单位：米）
+LIDINGTIAOYUAN_SCORES = {
+    '男生': [
+        (2.49, 3.0), (2.41, 2.85), (2.33, 2.7), (2.25, 2.55), (2.20, 2.4), (2.15, 2.25), (2.10, 2.1),
+        (2.06, 1.95), (2.02, 1.8), (1.98, 1.65), (1.94, 1.5), (1.90, 1.35), (1.86, 1.2), (1.82, 1.05),
+        (1.78, 0.9), (1.74, 0.75), (1.70, 0.6), (1.66, 0.45), (1.62, 0.3), (1.58, 0.15)
+    ],
+    '女生': [
+        (1.99, 3.0), (1.93, 2.85), (1.87, 2.7), (1.81, 2.55), (1.77, 2.4), (1.73, 2.25), (1.69, 2.1),
+        (1.65, 1.95), (1.61, 1.8), (1.57, 1.65), (1.53, 1.5), (1.49, 1.35), (1.45, 1.2), (1.41, 1.05),
+        (1.37, 0.9), (1.33, 0.75), (1.28, 0.6), (1.23, 0.45), (1.18, 0.3), (1.13, 0.15)
+    ]
+}
 
-VOLLEYBALL_LIMITS = [45,43,40,37,34,31,29,26,23,20,18,16,14,12,10,8,6,5,4,3]
-VOLLEYBALL_SCORES = [3.00,2.85,2.70,2.55,2.40,2.25,2.10,1.95,1.80,1.65,1.50,1.35,1.20,1.05,0.90,0.75,0.60,0.45,0.30,0.15]
+# 4. 50米跑 - 官方标准（单位：秒），时间越小得分越高
+WUMISHI_SCORES = {
+    '男生': [
+        (7.1, 3.0), (7.2, 2.85), (7.3, 2.7), (7.4, 2.55), (7.5, 2.4), (7.6, 2.25), (7.7, 2.1),
+        (7.9, 1.95), (8.1, 1.8), (8.3, 1.65), (8.5, 1.5), (8.7, 1.35), (8.9, 1.2), (9.1, 1.05),
+        (9.3, 0.9), (9.5, 0.75), (9.7, 0.6), (9.9, 0.45), (10.1, 0.3), (10.3, 0.15)
+    ],
+    '女生': [
+        (8.1, 3.0), (8.2, 2.85), (8.3, 2.7), (8.4, 2.55), (8.5, 2.4), (8.6, 2.25), (8.8, 2.1),
+        (9.0, 1.95), (9.2, 1.8), (9.4, 1.65), (9.6, 1.5), (9.8, 1.35), (10.0, 1.2), (10.2, 1.05),
+        (10.4, 0.9), (10.6, 0.75), (10.8, 0.6), (11.0, 0.45), (11.2, 0.3), (11.4, 0.15)
+    ]
+}
+
+# 5. 25米游泳 - 官方标准（单位：秒）
+YOUYONG25_SCORES = {
+    '男生': [
+        (22.0, 3.0), (23.0, 2.85), (24.0, 2.7), (25.0, 2.55), (26.0, 2.4), (27.0, 2.25), (28.0, 2.1),
+        (29.0, 1.95), (30.0, 1.8), (31.0, 1.65), (32.0, 1.5), (33.0, 1.35), (34.0, 1.2), (35.0, 1.05),
+        (36.0, 0.9), (37.0, 0.75), (38.0, 0.6), (39.0, 0.45), (40.0, 0.3), (41.0, 0.15)
+    ],
+    '女生': [
+        (25.0, 3.0), (26.0, 2.85), (27.0, 2.7), (28.0, 2.55), (29.0, 2.4), (30.0, 2.25), (31.0, 2.1),
+        (32.0, 1.95), (33.0, 1.8), (34.0, 1.65), (35.0, 1.5), (36.0, 1.35), (37.0, 1.2), (38.0, 1.05),
+        (39.0, 0.9), (40.0, 0.75), (41.0, 0.6), (42.0, 0.45), (43.0, 0.3), (44.0, 0.15)
+    ]
+}
+
+# 6. 200米游泳 - 官方标准（单位：秒）
+YOUYONG200_SCORES = {
+    '男生': [
+        (276, 6.0), (288, 5.7), (300, 5.4), (312, 5.1), (324, 4.8), (336, 4.5), (348, 4.2),
+        (360, 3.9), (372, 3.6), (384, 3.3), (396, 3.0), (408, 2.7), (420, 2.4), (432, 2.1),
+        (444, 1.8), (456, 1.5), (468, 1.2), (480, 0.9), (492, 0.6), (504, 0.3), (516, 0.0)
+    ],
+    '女生': [
+        (296, 6.0), (308, 5.7), (320, 5.4), (332, 5.1), (344, 4.8), (356, 4.5), (368, 4.2),
+        (380, 3.9), (392, 3.6), (404, 3.3), (416, 3.0), (428, 2.7), (440, 2.4), (452, 2.1),
+        (464, 1.8), (476, 1.5), (488, 1.2), (500, 0.9), (512, 0.6), (524, 0.3), (536, 0.0)
+    ]
+}
+
+# 7. 足球运球 - 官方标准（单位：秒）
+ZUQIU_SCORES = {
+    '男生': [
+        (7.6, 3.0), (8.7, 2.85), (9.6, 2.7), (10.5, 2.55), (11.3, 2.4), (12.2, 2.25), (13.1, 2.1),
+        (14.3, 1.95), (15.5, 1.8), (16.0, 1.65), (16.8, 1.5), (17.4, 1.35), (17.9, 1.2), (18.3, 1.05),
+        (19.0, 0.9), (19.6, 0.75), (20.0, 0.6), (20.5, 0.45), (21.0, 0.3), (21.5, 0.15)
+    ],
+    '女生': [
+        (8.5, 3.0), (10.8, 2.85), (12.9, 2.7), (14.2, 2.55), (16.4, 2.4), (18.3, 2.25), (19.5, 2.1),
+        (20.7, 1.95), (22.0, 1.8), (22.8, 1.65), (23.5, 1.5), (23.9, 1.35), (24.6, 1.2), (25.1, 1.05),
+        (25.5, 0.9), (26.2, 0.75), (26.8, 0.6), (27.3, 0.45), (27.9, 0.3), (28.3, 0.15)
+    ]
+}
+
+# 8. 篮球 - 官方标准（单位：秒）
+LANQIU_SCORES = {
+    '男生': [
+        (20, 3.0), (21, 2.85), (22, 2.7), (23, 2.55), (24, 2.4), (25, 2.25), (27, 2.1),
+        (29, 1.95), (31, 1.8), (33, 1.65), (35, 1.5), (37, 1.35), (39, 1.2), (41, 1.05),
+        (43, 0.9), (45, 0.75), (47, 0.6), (49, 0.45), (51, 0.3), (53, 0.15)
+    ],
+    '女生': [
+        (26, 3.0), (27, 2.85), (28, 2.7), (30, 2.55), (32, 2.4), (34, 2.25), (36, 2.1),
+        (38, 1.95), (42, 1.8), (46, 1.65), (50, 1.5), (54, 1.35), (58, 1.2), (62, 1.05),
+        (66, 0.9), (70, 0.75), (74, 0.6), (78, 0.45), (82, 0.3), (86, 0.15)
+    ]
+}
+
+# 9. 排球垫球（40秒）- 官方标准（单位：次）
+PAIQIU_SCORES = [
+    (45, 3.0), (43, 2.85), (40, 2.7), (37, 2.55), (34, 2.4), (31, 2.25), (29, 2.1),
+    (26, 1.95), (23, 1.8), (20, 1.65), (18, 1.5), (16, 1.35), (14, 1.2), (12, 1.05),
+    (10, 0.9), (8, 0.75), (6, 0.6), (5, 0.45), (4, 0.3), (3, 0.15)
+]
+
+# 10. 乒乓球 - 官方标准（单位：次）
+PINGPONG_SCORES = {
+    30: 3.0, 29: 3.0, 28: 3.0, 27: 3.0, 26: 3.0, 25: 3.0,
+    24: 2.88, 23: 2.76, 22: 2.64, 21: 2.52, 20: 2.40,
+    19: 2.28, 18: 2.16, 17: 2.04, 16: 1.92, 15: 1.80,
+    14: 1.68, 13: 1.56, 12: 1.44, 11: 1.32, 10: 1.20,
+    9: 1.08, 8: 0.96, 7: 0.84, 6: 0.72, 5: 0.60,
+    4: 0.48, 3: 0.36, 2: 0.24, 1: 0.12, 0: 0.0
+}
+
+# 11. 羽毛球 - 官方标准（单位：分）
+YUMAOQIU_SCORES = [
+    (150, 3.0), (149, 2.95), (140, 2.9), (130, 2.85), (120, 2.8), (110, 2.75),
+    (100, 2.7), (95, 2.6), (90, 2.5), (85, 2.4), (80, 2.3), (75, 2.2),
+    (70, 2.1), (65, 2.0), (60, 1.9), (55, 1.8), (50, 1.7), (45, 1.6),
+    (40, 1.5), (35, 1.4), (30, 1.3), (25, 1.2), (20, 1.1), (15, 1.0),
+    (10, 0.9), (5, 0.8), (0, 0.0)
+]
+
+# 12. 网球 - 官方标准（单位：分）
+WANGQIU_SCORES = {
+    '男生': [
+        (120, 3.0), (99, 2.7), (88, 2.4), (77, 2.1), (66, 1.8), (55, 1.5),
+        (44, 1.2), (33, 0.9), (22, 0.6), (11, 0.3), (8, 0.15), (0, 0.0)
+    ],
+    '女生': [
+        (120, 3.0), (91, 2.7), (81, 2.4), (71, 2.1), (61, 1.8), (51, 1.5),
+        (41, 1.2), (31, 0.9), (21, 0.6), (11, 0.3), (8, 0.15), (0, 0.0)
+    ]
+}
+
+# 13. 仰卧起坐（1分钟）- 官方标准（单位：次）
+YANGWOQIZUO_SCORES = [
+    (50, 3.0), (47, 2.85), (44, 2.7), (41, 2.55), (38, 2.4), (35, 2.25),
+    (32, 2.1), (30, 1.95), (28, 1.8), (26, 1.65), (24, 1.5), (22, 1.35),
+    (20, 1.2), (18, 1.05), (16, 0.9), (14, 0.75), (12, 0.6), (10, 0.45),
+    (8, 0.3), (6, 0.15)
+]
+
+# 14. 引体向上 - 官方标准（单位：次）
+YINTIXIANGSHANG_SCORES = [
+    (11, 3.0), (10, 2.85), (9, 2.7), (8, 2.4), (7, 2.1), (6, 1.8),
+    (5, 1.5), (4, 1.2), (3, 0.9), (2, 0.6), (1, 0.3)
+]
+
+# 15. 4分钟跳绳 - 官方标准（单位：次）
+TIAOSHENG_SCORES = {
+    '男生': [
+        (400, 6.0), (395, 5.7), (390, 5.4), (385, 5.1), (380, 4.8), (370, 4.5),
+        (365, 4.2), (360, 3.9), (340, 3.6), (320, 3.3), (300, 3.0), (290, 2.7),
+        (285, 2.4), (280, 2.1), (275, 1.8), (270, 1.5), (265, 1.2), (260, 0.9),
+        (255, 0.6), (250, 0.3)
+    ],
+    '女生': [
+        (405, 6.0), (400, 5.7), (395, 5.4), (390, 5.1), (385, 4.8), (375, 4.5),
+        (370, 4.2), (365, 3.9), (345, 3.6), (325, 3.3), (305, 3.0), (295, 2.7),
+        (290, 2.4), (285, 2.1), (280, 1.8), (275, 1.5), (270, 1.2), (265, 0.9),
+        (260, 0.6), (250, 0.3)
+    ]
+}
+
+# 16. 武术/体操 - 官方标准（单位：分，满分10分换算为3分制）
+WUSHU_TICAO_SCORES = [
+    (9.0, 3.0), (7.5, 2.25), (6.0, 1.8), (5.9, 0.0)
+]
 
 HEADERS = ['序号', '班级', '姓名', '性别',
            '第一类项目', '第一类成绩', '第一类得分', '',
@@ -90,6 +254,11 @@ def col_to_num(col):
 def time_to_seconds(s):
     if pd.isna(s) or str(s).strip() == '': return np.nan
     s = str(s).strip().replace('′', "'").replace('″', '"').replace(':', "'").replace('’', "'")
+    # 新增：处理纯数字（如“316”→“3'16"”，“408”→“4'08"”）
+    if s.isdigit() and len(s) >=3:
+        m = s[:-2]  # 分钟部分
+        sec = s[-2:] # 秒数部分
+        s = f"{m}'{sec}"
     s = re.sub(r'[^\d\'"]', '', s)
     try:
         if "'" in s:
@@ -104,25 +273,30 @@ def to_num(x):
     if pd.isna(x): return np.nan
     return float(re.sub(r'[^\d.]', '', str(x)))
 
-# ====================== 评分函数（已补全仰卧起坐、引体向上） ======================
+# ====================== 核心评分函数（重构：全部使用官方映射表） ======================
 def get_score(gender, project, value):
     if pd.isna(value) or str(value).strip() in ['', '-']:
         return "缺考"
 
     p = str(project).strip()
+    # 项目名称标准化（兼容不同命名）
     p_map = {
-        '800米':'800/1000米','1000米':'800/1000米','800/1000米':'800/1000米',
-        '实心球':'实心球','双手头上前掷实心球':'实心球',
-        '仰卧起坐':'仰卧起坐','一分钟仰卧起坐':'仰卧起坐',
-        '4分钟跳绳':'4min跳绳','4min跳绳':'4min跳绳',
-        '50米跑':'50m跑','排球垫球':'排球','排球':'排球',
-        '乒乓':'乒乓球','乒乓球':'乒乓球',
-        '25m游泳':'25米游泳','25米游泳':'25米游泳',
-        '200m游泳':'200米游泳','200米游泳':'200米游泳',
-        '武术操':'武术','武术':'武术','体操':'体操','羽毛球':'羽毛球','篮球':'篮球','足球':'足球运球'
+        '800米': '800米', '1000米': '1000米', '800/1000米': '800米' if gender == '女' else '1000米',
+        '实心球': '实心球', '双手头上前掷实心球': '实心球',
+        '仰卧起坐': '仰卧起坐', '一分钟仰卧起坐': '仰卧起坐',
+        '4分钟跳绳': '4分钟跳绳', '4min跳绳': '4分钟跳绳',
+        '50米跑': '50米跑', '50m跑': '50米跑',  # 兼容“50m跑”
+        '排球垫球': '排球', '排球': '排球',
+        '乒乓': '乒乓球', '乒乓球': '乒乓球',
+        '25m游泳': '25米游泳', '25米游泳': '25米游泳',
+        '200m游泳': '200米游泳', '200米游泳': '200米游泳',
+        '武术操': '武术', '武术': '武术', '体操': '体操', '羽毛球': '羽毛球',
+        '篮球': '篮球', '足球': '足球运球', '足球运球': '足球运球',
+        '网球': '网球', '引体向上': '引体向上', '立定跳远': '立定跳远'
     }
     p = p_map.get(p, p)
 
+    # 转换成绩为数值
     val = to_num(value)
     if np.isnan(val):
         return "缺考"
@@ -133,101 +307,176 @@ def get_score(gender, project, value):
     if p == '实心球' and DEFAULT_CONFIG['实心球单位'] == '厘米':
         val /= 100
 
-    # 自定义项目（用户添加的）
+    # 优先匹配GUI添加的自定义映射项目
+    for custom in DEFAULT_CONFIG['自定义映射项目']:
+        if custom['name'] == p:
+            # 按映射表查找得分
+            for lim, sc in custom['score_map']:
+                if (custom['bigger_better'] and val >= lim) or (not custom['bigger_better'] and val <= lim):
+                    return round(sc, 2)
+            return 0.0
+
+    # 原自定义项目（比例制）兼容
     for custom in DEFAULT_CONFIG['自定义项目']:
         if custom['name'] == p:
             std = custom['full_value']
             if std == 0: return 0.0
-            if custom['bigger_better']:
-                ratio = val / std
-            else:
-                ratio = std / val if val > 0 else 0
+            ratio = val / std if custom['bigger_better'] else (std / val if val > 0 else 0)
             score = ratio * 3
             return round(max(0, min(3, score)), 2)
 
-    # 写死的特殊项目：武术、体操（满分3分线性制）
-    if p == '武术':
-        std = 10.0
-        ratio = val / std
-        score = ratio * 3
-        return round(max(0, min(3, score)), 2)
-
-    if p == '体操':
-        std = 20.0
-        ratio = val / std
-        score = ratio * 3
-        return round(max(0, min(3, score)), 2)
-
-    # 800/1000米特殊
-    if p == '800/1000米':
+    # ====================== 恢复附加分逻辑 ======================
+    # 800米/1000米（基础分+附加分）
+    if p in ['800米', '1000米']:
         sec = time_to_seconds(value)
         if np.isnan(sec): return "缺考"
-        if gender == '女':
-            bonus = 1.0 if sec <= RUN_BONUS['女生800米_1分秒数'] else (0.5 if sec <= RUN_BONUS['女生800米_0.5分秒数'] else 0.0)
-            table = [(220,6.0),(228,5.7),(236,5.4),(244,5.1),(252,4.8),(257,4.5),(262,4.2),
-                     (267,3.9),(272,3.6),(278,3.3),(284,3.0),(290,2.7),(296,2.4),(302,2.1),
-                     (308,1.8),(314,1.5),(320,1.2),(326,0.9),(332,0.6)]
-        else:
+        
+        # 基础分
+        base_score = 0.0
+        if p == '1000米' and gender == '男':
+            for lim, sc in RUN_SCORES['男生1000米']:
+                if sec <= lim:
+                    base_score = sc
+                    break
+        elif p == '800米' and gender == '女':
+            for lim, sc in RUN_SCORES['女生800米']:
+                if sec <= lim:
+                    base_score = sc
+                    break
+        
+        # 恢复原附加分判断逻辑
+        bonus = 0.0
+        if p == '1000米' and gender == '男':
             bonus = 1.0 if sec <= RUN_BONUS['男生1000米_1分秒数'] else (0.5 if sec <= RUN_BONUS['男生1000米_0.5分秒数'] else 0.0)
-            table = [(235,6.0),(243,5.7),(251,5.4),(259,5.1),(267,4.8),(272,4.5),(277,4.2),
-                     (282,3.9),(287,3.6),(293,3.3),(299,3.0),(305,2.7),(311,2.4),(317,2.1),
-                     (323,1.8),(329,1.5),(335,1.2),(341,0.9),(347,0.6)]
-        base = 0.0
-        for lim, sc in table:
-            if sec <= lim:
-                base = sc
-                break
-        return round(base + bonus, 2)
+        elif p == '800米' and gender == '女':
+            bonus = 1.0 if sec <= RUN_BONUS['女生800米_1分秒数'] else (0.5 if sec <= RUN_BONUS['女生800米_0.5分秒数'] else 0.0)
+        
+        total = min(base_score + bonus, 7.0)
+        return round(total, 2)
 
-    if p == '乒乓球':
-        n = int(val or 0)
-        if n >= 25: return 3.00
-        return PINGPONG_SCORES.get(n, 0.0)
-
-    if p == '排球':
-        for l, s in zip(VOLLEYBALL_LIMITS, VOLLEYBALL_SCORES):
-            if val >= l: return s
+    # 2. 实心球（第二类项目，满分3分）
+    if p == '实心球':
+        scores = SHIXINQIU_SCORES['男生'] if gender == '男' else SHIXINQIU_SCORES['女生']
+        for lim, sc in scores:
+            if val >= lim:
+                return round(sc, 2)
         return 0.0
 
-    # 内置线性项目（严格比例，已补全仰卧起坐、引体向上）
-    key = p
-    if p == '实心球':
-        key = '实心球男生满分米数' if gender == '男' else '实心球女生满分米数'
-    elif p == '立定跳远':
-        key = '立定跳远男生满分米数' if gender == '男' else '立定跳远女生满分米数'
-    elif p == '50m跑':
-        key = '50米跑男生满分秒数' if gender == '男' else '50米跑女生满分秒数'
-    elif p in ['25m游泳', '25米游泳', '200米游泳']:
-        if p == '25m游泳' or p == '25米游泳':
-            key = '25米游泳男生满分秒数' if gender == '男' else '25米游泳女生满分秒数'
-        else:  # 200米游泳
-            key = '200米游泳满分秒数'
-        if key in STANDARD_FULL:
-            val = time_to_seconds(value)
-            std = STANDARD_FULL[key]  # 满分对应的最短时间
-            if val <= 0: return 0.0
-            # 时间越短越好：用满分时间 / 实际时间 算比例
-            ratio = std / val
-            score = ratio * 3
-            print(std, val, ratio, score)
-            return round(max(0, min(3, score)), 2)
-    elif p == '足球运球':
-        key = '足球运球男生满分秒数' if gender == '男' else '足球运球女生满分秒数'
-    elif p == '4min跳绳':
-        key = '4分钟跳绳男生满分次数' if gender == '男' else '4分钟跳绳女生满分次数'
-    elif p == '仰卧起坐':
-        key = '仰卧起坐满分次数'
-    elif p == '引体向上':
-        key = '引体向上满分次数'
+    # 3. 立定跳远（第二类项目，满分3分）
+    if p == '立定跳远':
+        scores = LIDINGTIAOYUAN_SCORES['男生'] if gender == '男' else LIDINGTIAOYUAN_SCORES['女生']
+        for lim, sc in scores:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
 
-    if key in STANDARD_FULL:
-        std = STANDARD_FULL[key]
-        if std == 0: return 0.0
-        ratio = val / std
-        score = ratio * 3
-        return round(max(0, min(3, score)), 2)
+    # 4. 50米跑（第二类项目，满分3分）
+    if p == '50米跑':
+        scores = WUMISHI_SCORES['男生'] if gender == '男' else WUMISHI_SCORES['女生']
+        for lim, sc in scores:
+            if val <= lim:  # 时间越小得分越高
+                return round(sc, 2)
+        return 0.0
 
-    return 3.00
+    # 5. 25米游泳（第二类项目，满分3分）
+    if p == '25米游泳':
+        sec = time_to_seconds(value)
+        if np.isnan(sec): return "缺考"
+        scores = YOUYONG25_SCORES['男生'] if gender == '男' else YOUYONG25_SCORES['女生']
+        for lim, sc in scores:
+            if sec <= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 6. 引体向上（男生第二类项目，满分3分）
+    if p == '引体向上' and gender == '男':
+        for lim, sc in YINTIXIANGSHANG_SCORES:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 7. 仰卧起坐（女生第二类项目，满分3分）
+    if p == '仰卧起坐' and gender == '女':
+        for lim, sc in YANGWOQIZUO_SCORES:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 8. 4分钟跳绳（第一类项目，满分6分）
+    if p == '4分钟跳绳':
+        scores = TIAOSHENG_SCORES['男生'] if gender == '男' else TIAOSHENG_SCORES['女生']
+        for lim, sc in scores:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 9. 200米游泳（第一类项目，满分6分）
+    if p == '200米游泳':
+        sec = time_to_seconds(value)
+        if np.isnan(sec): return "缺考"
+        scores = YOUYONG200_SCORES['男生'] if gender == '男' else YOUYONG200_SCORES['女生']
+        for lim, sc in scores:
+            if sec <= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 10. 乒乓球（第三类项目，满分3分）
+    if p == '乒乓球':
+        n = int(val) if val >= 0 else 0
+        return PINGPONG_SCORES.get(n, 0.0)
+
+    # 11. 羽毛球（第三类项目，满分3分）
+    if p == '羽毛球':
+        for lim, sc in YUMAOQIU_SCORES:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 12. 网球（第三类项目，满分3分）
+    if p == '网球':
+        scores = WANGQIU_SCORES['男生'] if gender == '男' else WANGQIU_SCORES['女生']
+        for lim, sc in scores:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 13. 武术/体操（第三类项目，满分3分）
+    if p in ['武术', '体操']:
+        for lim, sc in WUSHU_TICAO_SCORES:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 14. 足球运球（第四类项目，满分3分）
+    if p == '足球运球':
+        sec = time_to_seconds(value)
+        if np.isnan(sec): return "缺考"
+        scores = ZUQIU_SCORES['男生'] if gender == '男' else ZUQIU_SCORES['女生']
+        for lim, sc in scores:
+            if sec <= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 15. 篮球（第四类项目，满分3分）
+    if p == '篮球':
+        sec = time_to_seconds(value)
+        if np.isnan(sec): return "缺考"
+        scores = LANQIU_SCORES['男生'] if gender == '男' else LANQIU_SCORES['女生']
+        for lim, sc in scores:
+            if sec <= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 16. 排球（第四类项目，满分3分）
+    if p == '排球':
+        for lim, sc in PAIQIU_SCORES:
+            if val >= lim:
+                return round(sc, 2)
+        return 0.0
+
+    # 未匹配到的项目（默认返回0分，避免报错）
+    print(f"未匹配到项目：{gender} - {p} - {value}")
+    return 0.0
 
 # ====================== GUI 类（新增更多配置项） ======================
 class SportsScoreGUI:
@@ -249,8 +498,11 @@ class SportsScoreGUI:
 
         self.create_widgets()
         self.load_config()
-        self.update_custom_list()
+        # self.update_custom_list()
         self.check_for_update()
+        # 初始化新版列表（替换旧的 update_custom_list）
+        self.update_map_list()    # 初始化映射式项目列表
+        self.update_ratio_list()  # 初始化比例式项目列表
 
 
     def create_widgets(self):
@@ -437,35 +689,63 @@ class SportsScoreGUI:
         entry_suffix.grid(row=row, column=1, padx=10, pady=5)
         self.standard_entries['统计文件名后缀'] = entry_suffix
 
-        # 自定义项目
-        custom_frame = ttk.LabelFrame(scrollable_frame_standard, text="自定义项目（满分3分制）")
+        # 自定义项目（合并版：映射式+比例式，删除重复的旧版）
+        custom_frame = ttk.LabelFrame(scrollable_frame_standard, text="自定义项目（支持映射式/比例式）")
         custom_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        add_frame = ttk.Frame(custom_frame)
-        add_frame.pack(fill="x", pady=5)
+        # 1. 映射式自定义项目（新增）
+        map_frame = ttk.LabelFrame(custom_frame, text="映射式项目（一一对应评分）")
+        map_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        ttk.Label(add_frame, text="项目名:").grid(row=0, column=0, padx=5)
-        self.custom_name = ttk.Entry(add_frame, width=15)
-        self.custom_name.grid(row=0, column=1, padx=5)
+        # 映射项目添加区域
+        add_map_frame = ttk.Frame(map_frame)
+        add_map_frame.pack(fill="x", pady=5)
+        ttk.Label(add_map_frame, text="项目名:").grid(row=0, column=0, padx=5)
+        self.map_name = ttk.Entry(add_map_frame, width=15)
+        self.map_name.grid(row=0, column=1, padx=5)
 
-        ttk.Label(add_frame, text="满分值:").grid(row=0, column=2, padx=5)
-        self.custom_full = ttk.Entry(add_frame, width=10)
-        self.custom_full.grid(row=0, column=3, padx=5)
+        ttk.Label(add_map_frame, text="越大越好:").grid(row=0, column=2, padx=5)
+        self.map_bigger = tk.BooleanVar(value=True)
+        ttk.Checkbutton(add_map_frame, variable=self.map_bigger).grid(row=0, column=3, padx=5)
 
-        ttk.Label(add_frame, text="单位:").grid(row=0, column=4, padx=5)
-        self.custom_unit = ttk.Entry(add_frame, width=10)
-        self.custom_unit.grid(row=0, column=5, padx=5)
+        ttk.Label(add_map_frame, text="映射规则（格式：阈值,得分;阈值,得分）:").grid(row=0, column=4, padx=5)
+        self.map_rules = ttk.Entry(add_map_frame, width=50)
+        self.map_rules.grid(row=0, column=5, padx=5)
+        ttk.Button(add_map_frame, text="添加映射项目", command=self.add_map_project).grid(row=0, column=6, padx=10)
 
-        ttk.Label(add_frame, text="越大越好:").grid(row=0, column=6, padx=5)
-        self.custom_bigger = tk.BooleanVar(value=True)
-        ttk.Checkbutton(add_frame, variable=self.custom_bigger).grid(row=0, column=7, padx=5)
+        # 映射项目列表
+        self.map_listbox = tk.Listbox(map_frame, height=8)
+        self.map_listbox.pack(fill="both", expand=True, padx=10, pady=5)
+        ttk.Button(map_frame, text="删除选中映射项目", command=self.delete_map_project).pack(pady=5)
 
-        ttk.Button(add_frame, text="添加项目", command=self.add_custom_project).grid(row=0, column=8, padx=10)
+        # 2. 比例式自定义项目（保留原功能，兼容旧版）
+        ratio_frame = ttk.LabelFrame(custom_frame, text="比例式项目（满分3分制）")
+        ratio_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.custom_listbox = tk.Listbox(custom_frame, height=10)
-        self.custom_listbox.pack(fill="both", expand=True, padx=10, pady=5)
+        add_ratio_frame = ttk.Frame(ratio_frame)
+        add_ratio_frame.pack(fill="x", pady=5)
+        ttk.Label(add_ratio_frame, text="项目名:").grid(row=0, column=0, padx=5)
+        self.ratio_name = ttk.Entry(add_ratio_frame, width=15)
+        self.ratio_name.grid(row=0, column=1, padx=5)
 
-        ttk.Button(custom_frame, text="删除选中项目", command=self.delete_custom_project).pack(pady=5)
+        ttk.Label(add_ratio_frame, text="满分值:").grid(row=0, column=2, padx=5)
+        self.ratio_full = ttk.Entry(add_ratio_frame, width=10)
+        self.ratio_full.grid(row=0, column=3, padx=5)
+
+        ttk.Label(add_ratio_frame, text="单位:").grid(row=0, column=4, padx=5)
+        self.ratio_unit = ttk.Entry(add_ratio_frame, width=10)
+        self.ratio_unit.grid(row=0, column=5, padx=5)
+
+        ttk.Label(add_ratio_frame, text="越大越好:").grid(row=0, column=6, padx=5)
+        self.ratio_bigger = tk.BooleanVar(value=True)
+        ttk.Checkbutton(add_ratio_frame, variable=self.ratio_bigger).grid(row=0, column=7, padx=5)
+
+        ttk.Button(add_ratio_frame, text="添加比例项目", command=self.add_ratio_project).grid(row=0, column=8, padx=10)
+
+        # 比例项目列表
+        self.ratio_listbox = tk.Listbox(ratio_frame, height=8)
+        self.ratio_listbox.pack(fill="both", expand=True, padx=10, pady=5)
+        ttk.Button(ratio_frame, text="删除选中比例项目", command=self.delete_ratio_project).pack(pady=5)
 
         canvas_standard.pack(side="left", fill="both", expand=True)
         scrollbar_standard.pack(side="right", fill="y")
@@ -529,12 +809,12 @@ class SportsScoreGUI:
         config = {}
         config['当前版本'] = DEFAULT_CONFIG['当前版本']
         config['忽略更新版本'] = DEFAULT_CONFIG.get('忽略更新版本', '')
-
+        # 列配置
         for label, entry in self.config_entries.items():
             value = entry.get().strip().upper()
             if value:
                 config[label] = value
-
+        # 标准配置
         for label, entry in self.standard_entries.items():
             if isinstance(entry, (tk.StringVar, tk.BooleanVar)):
                 config[label] = entry.get()
@@ -545,25 +825,28 @@ class SportsScoreGUI:
                         config[label] = float(value)
                     except:
                         config[label] = value
-
-        config['自定义项目'] = self.custom_projects
-
+        # 自定义项目（比例式+映射式）
+        config['自定义项目'] = DEFAULT_CONFIG['自定义项目']
+        config['自定义映射项目'] = DEFAULT_CONFIG['自定义映射项目']
+        # 保存
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
         messagebox.showinfo("成功", "配置已保存！")
 
     def load_config(self):
         if not os.path.exists(CONFIG_FILE):
+            self.update_map_list()
+            self.update_ratio_list()
             return
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
-
+            # 列配置
             for label, entry in self.config_entries.items():
                 if label in saved:
                     entry.delete(0, tk.END)
                     entry.insert(0, saved[label])
-
+            # 标准配置
             for label, entry in self.standard_entries.items():
                 if label in saved:
                     if isinstance(entry, (tk.StringVar, tk.BooleanVar)):
@@ -571,11 +854,11 @@ class SportsScoreGUI:
                     else:
                         entry.delete(0, tk.END)
                         entry.insert(0, str(saved[label]))
-
-            if '自定义项目' in saved:
-                self.custom_projects = saved['自定义项目']
-                self.update_custom_list()
-                DEFAULT_CONFIG['自定义项目'] = self.custom_projects[:]
+            # 自定义项目
+            DEFAULT_CONFIG['自定义项目'] = saved.get('自定义项目', [])
+            DEFAULT_CONFIG['自定义映射项目'] = saved.get('自定义映射项目', [])
+            self.update_map_list()
+            self.update_ratio_list()
         except Exception as e:
             messagebox.showerror("错误", f"加载配置失败：{e}")
 
@@ -704,7 +987,8 @@ class SportsScoreGUI:
                 while len(df.columns) <= max_col:
                     df[len(df.columns)] = np.nan
 
-                missing_rows = []
+                # 修复点1：新增列标记是否缺考，避免行号错乱
+                df['是否缺考'] = False
 
                 for i in range(len(df)):
                     if pd.isna(df.iat[i, NAME_N]): 
@@ -729,11 +1013,12 @@ class SportsScoreGUI:
 
                     total = round(sum(scores_num), decimal_places)
                     df.iat[i, TOTAL_N] = total
+                    # 修复点2：用列标记缺考，而非记录行号
                     if has_missing:
-                        missing_rows.append(i + 2)
+                        df.iat[i, df.columns.get_loc('是否缺考')] = True
 
                 # 先设置列名（关键！避免 KeyError: '总分'）
-                df.columns = HEADERS[:len(df.columns)]
+                df.columns = HEADERS[:len(df.columns)-1] + ['是否缺考']  # 兼容新增列
 
                 # 再加排名列（可选 + 自定义方式 + 自动排序）
                 if DEFAULT_CONFIG['是否加排名列']:
@@ -743,21 +1028,33 @@ class SportsScoreGUI:
                         df = df.sort_values('总分', ascending=False).reset_index(drop=True)
                     df['排名'] = df['排名'].astype(int)
 
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+                # 修复点3：导出时排除标记列，避免污染Excel
+                df_export = df.drop(columns=['是否缺考'], errors='ignore')
+                df_export.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # 标红（使用自定义颜色）
+        # 标红标黄（修复核心：直接读取导出后的Excel，按得分列是否缺考判断）
         wb = load_workbook(self.output_file)
         red_font = Font(color=DEFAULT_CONFIG['缺考字体颜色'])
         fill = PatternFill("solid", fgColor=DEFAULT_CONFIG['缺考背景色'])
+        
         for sheet_name in selected_sheets:
             ws = wb[sheet_name]
+            # 先获取所有缺考的行号（从Excel直接判断，避免行号错乱）
+            absent_rows = set()
+            # 遍历得分列，收集有缺考的行号
             for row in ws.iter_rows(min_row=2):
                 for cell in row:
                     col_idx = cell.column - 1
                     if col_idx in SCORE_N and cell.value == "缺考":
+                        absent_rows.add(cell.row)
                         cell.font = red_font
                         cell.fill = fill
-                    if col_idx == TOTAL_N and cell.row in missing_rows:
+            
+            # 给有缺考的行的总分列标黄
+            for row in ws.iter_rows(min_row=2):
+                for cell in row:
+                    col_idx = cell.column - 1
+                    if col_idx == TOTAL_N and cell.row in absent_rows:
                         cell.font = red_font
                         cell.fill = fill
 
@@ -806,6 +1103,83 @@ class SportsScoreGUI:
         messagebox.showinfo("成功", "所有任务完成！")
         os.startfile(self.output_file)
 
+    # 映射式项目操作
+    def add_map_project(self):
+        name = self.map_name.get().strip()
+        rules = self.map_rules.get().strip()
+        if not name or not rules:
+            messagebox.showwarning("警告", "项目名和映射规则不能为空")
+            return
+        try:
+            # 解析映射规则（格式：阈值,得分;阈值,得分）
+            score_map = []
+            for rule in rules.split(';'):
+                lim, sc = rule.strip().split(',')
+                score_map.append((float(lim), float(sc)))
+            # 按阈值排序（越大越好升序，越小越好降序）
+            bigger = self.map_bigger.get()
+            score_map.sort(key=lambda x: x[0], reverse=not bigger)
+            # 添加到配置
+            project = {
+                'name': name,
+                'score_map': score_map,
+                'bigger_better': bigger
+            }
+            DEFAULT_CONFIG['自定义映射项目'].append(project)
+            self.update_map_list()
+            # 清空输入
+            self.map_name.delete(0, tk.END)
+            self.map_rules.delete(0, tk.END)
+        except Exception as e:
+            messagebox.showerror("错误", f"映射规则格式错误（示例：7.1,3.0;7.2,2.85）：{e}")
+
+    def delete_map_project(self):
+        selected = self.map_listbox.curselection()
+        if selected:
+            del DEFAULT_CONFIG['自定义映射项目'][selected[0]]
+            self.update_map_list()
+
+    def update_map_list(self):
+        self.map_listbox.delete(0, tk.END)
+        for proj in DEFAULT_CONFIG['自定义映射项目']:
+            direction = "越大越好" if proj['bigger_better'] else "越小越好"
+            rules = " | ".join([f"{lim}:{sc}分" for lim, sc in proj['score_map']])
+            text = f"{proj['name']} | {direction} | 规则：{rules}"
+            self.map_listbox.insert(tk.END, text)
+
+    # 比例式项目操作（替换原add_custom_project等方法）
+    def add_ratio_project(self):
+        name = self.ratio_name.get().strip()
+        if not name:
+            messagebox.showwarning("警告", "请输入项目名")
+            return
+        try:
+            full = float(self.ratio_full.get().strip())
+        except:
+            messagebox.showwarning("警告", "满分值必须是数字")
+            return
+        unit = self.ratio_unit.get().strip() or "个"
+        bigger = self.ratio_bigger.get()
+        project = {"name": name, "full_value": full, "unit": unit, "bigger_better": bigger}
+        DEFAULT_CONFIG['自定义项目'].append(project)
+        self.update_ratio_list()
+        self.ratio_name.delete(0, tk.END)
+        self.ratio_full.delete(0, tk.END)
+        self.ratio_unit.delete(0, tk.END)
+
+    def delete_ratio_project(self):
+        selected = self.ratio_listbox.curselection()
+        if selected:
+            del DEFAULT_CONFIG['自定义项目'][selected[0]]
+            self.update_ratio_list()
+
+    def update_ratio_list(self):
+        self.ratio_listbox.delete(0, tk.END)
+        for proj in DEFAULT_CONFIG['自定义项目']:
+            direction = "越大越好" if proj['bigger_better'] else "越小越好"
+            text = f"{proj['name']} | 满分 {proj['full_value']} {proj['unit']} | {direction}"
+            self.ratio_listbox.insert(tk.END, text)
+
     def check_for_update(self):
         current_version = DEFAULT_CONFIG['当前版本']
         ignore_version = DEFAULT_CONFIG.get('忽略更新版本', '')
@@ -832,7 +1206,6 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SportsScoreGUI(root)
     root.mainloop()
-
 
 
 
