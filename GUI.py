@@ -2,6 +2,7 @@
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import tkinter.font as tkfont
 import pandas as pd
 import numpy as np
 import re
@@ -12,6 +13,7 @@ import requests
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 import math
+import time
 
 warnings.filterwarnings("ignore")
 
@@ -39,7 +41,7 @@ DEFAULT_CONFIG = {
     '是否自动排序班级': True,
     '统计包含优秀率': True,
     '统计文件名后缀': '_统计汇总',
-    '当前版本': '2.0.0',
+    '当前版本': '2.1.0',
     '忽略更新版本': ''
 }
 
@@ -442,14 +444,21 @@ def get_score(gender, project, value):
 
     # 13. 武术/体操（第三类项目，满分3分）
     if p in ['武术', '体操']:
+        """
         for lim, sc in WUSHU_TICAO_SCORES:
             if val >= lim:
                 return round(sc, 2)
+        """
+        # 覆写，直接乘以3
+        if type(val) in [type(i) for i in [1, 1.1]]:
+            sc = val * 0.3
+            return round(sc, 2)
         return 0.0
 
     # 14. 足球运球（第四类项目，满分3分）
     if p == '足球运球':
-        sec = time_to_seconds(value)
+        # sec = time_to_seconds(value)
+        sec = float(value)
         if np.isnan(sec): return "缺考"
         scores = ZUQIU_SCORES['男生'] if gender == '男' else ZUQIU_SCORES['女生']
         for lim, sc in scores:
@@ -499,11 +508,29 @@ class SportsScoreGUI:
         self.create_widgets()
         self.load_config()
         # self.update_custom_list()
-        self.check_for_update()
+        # self.check_for_update()    # 服务器已停用
         # 初始化新版列表（替换旧的 update_custom_list）
         self.update_map_list()    # 初始化映射式项目列表
         self.update_ratio_list()  # 初始化比例式项目列表
+        self.signature_var = tk.StringVar(value="Made By CodeTea TEAM")
+        self.signature_label = tk.Label(
+            root,
+            textvariable=self.signature_var,
+            font=("Microsoft YaHei UI", 11, "italic"),
+            fg="#7c402e",
+            bg="#f0f0f0"
+        )
+        self.signature_label.place(relx=1.0, rely=1.0, anchor='se', x=-10, y=-8)
 
+        # 启动颜色渐变动画
+        self.signature_colors = ["#e74c3c", "#f39c12", "#27ae60", "#3498db", "#9b59b6", "#e67e22"]
+        self.sig_color_idx = 0
+        self.animate_signature()
+
+    def animate_signature(self):
+        self.sig_color_idx = (self.sig_color_idx + 1) % len(self.signature_colors)
+        self.signature_label.config(fg=self.signature_colors[self.sig_color_idx])
+        self.root.after(600, self.animate_signature)   # 每0.6秒换一次颜色
 
     def create_widgets(self):
         notebook = ttk.Notebook(self.root)
@@ -1202,11 +1229,86 @@ class SportsScoreGUI:
         except:
             pass  # 网络错误或超时，静默忽略
 
-if __name__ == "__main__":
+class SplashScreen:
+    def __init__(self, on_complete_callback):
+        self.on_complete = on_complete_callback
+        
+        self.root = tk.Tk()
+        self.root.overrideredirect(True)
+        self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", 0.0)
+
+        # 尝试透明背景（Windows效果最佳）
+        try:
+            self.root.wm_attributes("-transparentcolor", "black")
+            bg = "black"
+        except:
+            bg = "#1e1e1e"
+
+        self.root.configure(bg=bg)
+
+        # 居中
+        w, h = 750, 180
+        x = (self.root.winfo_screenwidth() - w) // 2
+        y = (self.root.winfo_screenheight() - h) // 2 - 80
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+
+        self.label = tk.Label(
+            self.root,
+            text="",
+            font=("Microsoft YaHei UI", 40, "bold"),
+            fg="#7c402e",
+            bg=bg
+        )
+        self.label.pack(expand=True)
+
+        self.text = "Made By CodeTea TEAM"
+        self.index = 0
+
+        self.typewriter()
+        self.fade_in()
+
+    def fade_in(self):
+        alpha = float(self.root.attributes("-alpha"))
+        if alpha < 0.95:
+            self.root.attributes("-alpha", alpha + 0.04)
+            self.root.after(35, self.fade_in)
+
+    def typewriter(self):
+        if self.index <= len(self.text):
+            self.label.config(text=self.text[:self.index] + ("|" if self.index % 2 else ""))
+            self.index += 1
+            speed = 70 if self.index < len(self.text) else 400  # 最后光标闪烁慢一点
+            self.root.after(speed, self.typewriter)
+        else:
+            # 打完后额外闪烁光标1.2秒，然后淡出
+            self.root.after(1200, self.start_fade_out)
+
+    def start_fade_out(self):
+        self.fade_out()
+
+    def fade_out(self):
+        alpha = float(self.root.attributes("-alpha"))
+        if alpha > 0.02:
+            self.root.attributes("-alpha", alpha - 0.06)
+            self.root.after(28, self.fade_out)
+        else:
+            self.root.destroy()
+            # 非常关键：窗口销毁后再调用主程序
+            if self.on_complete:
+                self.on_complete()
+
+def start_main_app():
+    """这里才是真正的主程序入口"""
     root = tk.Tk()
+    # root.withdraw()  # 如果想等会儿再显示
     app = SportsScoreGUI(root)
     root.mainloop()
 
+
+if __name__ == "__main__":
+    # 启动 splash，并把主程序作为回调传入
+    SplashScreen(on_complete_callback=start_main_app)
 
 
 
