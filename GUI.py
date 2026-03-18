@@ -14,6 +14,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 import math
 import time
+import random
 
 warnings.filterwarnings("ignore")
 
@@ -32,7 +33,7 @@ DEFAULT_CONFIG = {
     '是否加排名列': False,
     '缺考背景色': 'FFFF00',
     '立定跳远单位': '米',
-    '实心球单位': '米',
+    '实心球单位': '厘米',
     '自定义项目': [],
     '自定义映射项目': [],  # 新增：存储GUI添加的映射项目
     '总分小数位数': 2,
@@ -1232,13 +1233,13 @@ class SportsScoreGUI:
 class SplashScreen:
     def __init__(self, on_complete_callback):
         self.on_complete = on_complete_callback
+        self.is_destroyed = False          # 防止销毁后继续执行 after
         
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.0)
 
-        # 尝试透明背景（Windows效果最佳）
         try:
             self.root.wm_attributes("-transparentcolor", "black")
             bg = "black"
@@ -1247,68 +1248,129 @@ class SplashScreen:
 
         self.root.configure(bg=bg)
 
-        # 居中
         w, h = 750, 180
         x = (self.root.winfo_screenwidth() - w) // 2
         y = (self.root.winfo_screenheight() - h) // 2 - 80
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
-        self.label = tk.Label(
-            self.root,
+        self.canvas = tk.Canvas(self.root, width=w, height=h, bg=bg, highlightthickness=0)
+        self.canvas.pack(expand=True, fill="both")
+
+        self.text_id = self.canvas.create_text(
+            w//2, h//2,
             text="",
             font=("Microsoft YaHei UI", 40, "bold"),
-            fg="#7c402e",
-            bg=bg
+            fill="#7c402e",
+            tags="maintext"
         )
-        self.label.pack(expand=True)
+
+        self.particles = []
+        particle_colors = ["#ffaa00", "#ff8800", "#ff6600", "#ff4400", 
+                          "#cc3300", "#aa2200", "#7c402e", "#ff9900"]
+        
+        for i in range(12):
+            p = self.canvas.create_oval(0, 0, 10, 10, 
+                                       fill=particle_colors[i % len(particle_colors)], 
+                                       outline="")
+            self.particles.append(p)
 
         self.text = "Made By CodeTea TEAM"
-        self.index = 0
+        self.char_index = 0
 
-        self.typewriter()
+        # 光点动画控制变量
+        self.angle = 0
+        self.particle_after_id = None
+
+        self.start_typewriter_and_particles()
         self.fade_in()
 
     def fade_in(self):
+        if self.is_destroyed:
+            return
         alpha = float(self.root.attributes("-alpha"))
         if alpha < 0.95:
             self.root.attributes("-alpha", alpha + 0.04)
             self.root.after(35, self.fade_in)
 
+    def start_typewriter_and_particles(self):
+        # 同时启动打字和光点旋转
+        self.typewriter()
+        self.animate_particles()
+
     def typewriter(self):
-        if self.index <= len(self.text):
-            self.label.config(text=self.text[:self.index] + ("|" if self.index % 2 else ""))
-            self.index += 1
-            speed = 70 if self.index < len(self.text) else 400  # 最后光标闪烁慢一点
+        if self.is_destroyed:
+            return
+
+        if self.char_index <= len(self.text):
+            current_text = self.text[:self.char_index] + ("|" if self.char_index % 2 else "")
+            self.canvas.itemconfig(self.text_id, text=current_text)
+            self.char_index += 1
+            speed = 70 if self.char_index < len(self.text) else 400
             self.root.after(speed, self.typewriter)
         else:
-            # 打完后额外闪烁光标1.2秒，然后淡出
+            # 打字完成后可选择额外效果，比如持续闪烁光标或直接进入淡出倒计时
             self.root.after(1200, self.start_fade_out)
 
+    def animate_particles(self):
+        if self.is_destroyed:
+            return
+
+        self.angle += 0.06
+        base_radius = 140
+        center_x = 750 // 2
+        center_y = 180 // 2
+
+        for i, particle in enumerate(self.particles):
+            offset = i * (math.pi * 2 / len(self.particles))
+            radius_var = base_radius + math.sin(self.angle * 3 + i) * 15
+            
+            x = center_x + math.cos(self.angle + offset) * radius_var
+            y = center_y + math.sin(self.angle + offset) * (radius_var * 0.75)
+            
+            size = 8 + math.sin(self.angle * 4 + i) * 3
+            self.canvas.coords(particle, x - size/2, y - size/2, x + size/2, y + size/2)
+
+        # 每帧调度下一帧，并保存 ID
+        self.particle_after_id = self.root.after(30, self.animate_particles)
+
     def start_fade_out(self):
+        if self.is_destroyed:
+            return
         self.fade_out()
 
     def fade_out(self):
+        if self.is_destroyed:
+            return
         alpha = float(self.root.attributes("-alpha"))
         if alpha > 0.02:
             self.root.attributes("-alpha", alpha - 0.06)
             self.root.after(28, self.fade_out)
         else:
-            self.root.destroy()
-            # 非常关键：窗口销毁后再调用主程序
-            if self.on_complete:
-                self.on_complete()
+            self.destroy()
 
-def start_main_app():
-    """这里才是真正的主程序入口"""
-    root = tk.Tk()
-    # root.withdraw()  # 如果想等会儿再显示
-    app = SportsScoreGUI(root)
-    root.mainloop()
-
+    def destroy(self):
+        self.is_destroyed = True
+        # 取消所有可能的 after 回调
+        if self.particle_after_id:
+            try:
+                self.root.after_cancel(self.particle_after_id)
+            except:
+                pass
+        self.root.destroy()
+        if self.on_complete:
+            self.on_complete()
 
 if __name__ == "__main__":
-    # 启动 splash，并把主程序作为回调传入
-    SplashScreen(on_complete_callback=start_main_app)
+    root = tk.Tk()
+    root.withdraw()           # 先隐藏主窗口
+    
+    def on_splash_close():
+        root.deiconify()      # 显示主窗口
+        app = SportsScoreGUI(root)
+        root.mainloop()
+
+    splash = SplashScreen(on_complete_callback=on_splash_close)
+    splash.root.mainloop()
 
 
 
