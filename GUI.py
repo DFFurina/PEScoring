@@ -430,18 +430,36 @@ def get_score(gender, project, value):
 
     # 11. 羽毛球（第三类项目，满分3分）
     if p == '羽毛球':
+        """
         for lim, sc in YUMAOQIU_SCORES:
             if val >= lim:
                 return round(sc, 2)
         return 0.0
+        """
+        if type(val) in [type(i) for i in [1, 1.1]]:
+            if val < 100:
+                return val * 0.03
+            if val >= 100:
+                return 3.00
+        else:
+            return 0.0
 
     # 12. 网球（第三类项目，满分3分）
     if p == '网球':
+        """
         scores = WANGQIU_SCORES['男生'] if gender == '男' else WANGQIU_SCORES['女生']
         for lim, sc in scores:
             if val >= lim:
                 return round(sc, 2)
         return 0.0
+        """
+        if type(val) in [type(i) for i in [1, 1.1]]:
+            if val < 100:
+                return val * 0.03
+            if val >= 100:
+                return 3.00
+        else:
+            return 0.0
 
     # 13. 武术/体操（第三类项目，满分3分）
     if p in ['武术', '体操']:
